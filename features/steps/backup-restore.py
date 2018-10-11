@@ -78,12 +78,14 @@ def step_impl(context):
     assert_that(response, not_(has_key("FunctionError")))
 
 
+@given(u'that I run a backup on the database')
+def step_impl(context):
+    run(["fargate", "task", "run", "backup", "--image", "schickling/mysql-backup-s3"])
+    run(["fargate", "task", "wait", "backup"])
+
+
 @when(u'I restore that backup to a new database')
 def step_impl(context):
     call_ansible_step("create restore database", playbook="test-backup.yml")
     run(["fargate", "task", "run", "restore", "--image", "schickling/mysql-backup-s3"])
-
-
-@given(u'that I run a backup on the database')
-def step_impl(context):
-    run(["fargate", "task", "run", "backup", "--image", "schickling/mysql-backup-s3"])
+    run(["fargate", "task", "wait", "restore"])

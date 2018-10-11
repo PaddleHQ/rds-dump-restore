@@ -68,7 +68,7 @@
               aws_access_key: '{{ aws_access_key }}'
               aws_secret_key: '{{ aws_secret_key }}'
               security_token: '{{ security_token }}'
-          no_log: true2
+          no_log: true
 
     - tags:
         - parallel database creation
