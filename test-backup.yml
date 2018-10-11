@@ -35,6 +35,7 @@
     lambda_handler: "{{lambda_name}}.lambda_handler"
     lambda_role: "arn:aws:iam::{{aws_account}}:role/database_backup_testing"
     output_dir: ~/ansible_testing
+    lambda_builddir: "{{output_dir| expanduser}}/db_verify_lambdas"
     vpc_id: null
     origin_database_defs: &origin_database_defs
       id: test-encrypted-db
@@ -139,47 +140,15 @@
         - given that I have verification lambdas prepared
       block:
 
-        - name: ensure that output dirs exist
-          file:
-            path: "{{output_dir}}/{{item}}"
-            state: directory
-            mode: 0775
-          with_items:
-            "{{lambdas}}"
-
-        # ============================================================
-        # direct zip file upload
-        - name: move lambda into place for archive module
+        - name: move lambdas into output dir for clean building
           copy:
-            src: "{{item}}.py"
-            dest: "{{output_dir}}/{{item}}/{{item}}.py"
-          with_items:
-            "{{lambdas}}"
+            src: "lambdas/"
+            dest: "{{lambda_builddir}}"
 
-        - name: move lambda into place for archive module
-          copy:
-            src: "requirements.txt"
-            dest: "{{output_dir}}/requirements.txt"
-
-        - name: setup libraries
-          command: "pip install -t {{output_dir}}/{{item}} -r {{output_dir}}/requirements.txt"
-          with_items:
-              "{{lambdas}}"
-          delegate_to: localhost
-
-        - name: bundle set lambda into a zip
-          archive:
-            format: zip
-            path: "{{output_dir}}/{{set_lambda_name}}/."
-            dest: "{{output_dir}}/{{set_lambda_name}}.zip"
-          register: set_zip_res
-
-        - name: bundle check lambda into a zip
-          archive:
-            format: zip
-            path: "{{output_dir}}/{{check_lambda_name}}/."
-            dest: "{{output_dir}}/{{check_lambda_name}}.zip"
-          register: check_zip_res
+        - name: create lambda zipfiles
+          make:
+            chdir: "{{lambda_builddir}}"
+            target: zipfiles
 
         - name: ensure setter lambda is uploaded and configured for db
           lambda:
@@ -187,7 +156,7 @@
             runtime: "python3.6"
             handler: "{{set_lambda_name}}.handler"
             role: "{{lambda_role}}"
-            zip_file: "{{set_zip_res.dest}}"
+            zip_file: "{{lambda_builddir}}/{{set_lambda_name}}.zip"
             vpc_security_group_ids: "{{origin_db_result.vpc_security_groups | map(attribute='vpc_security_group_id')| list}}"
             vpc_subnet_ids: "{{origin_db_result.db_subnet_group.subnets | map(attribute='subnet_identifier')| list}}"
             timeout: 30
@@ -206,7 +175,7 @@
             runtime: "python3.6"
             handler: "{{check_lambda_name}}.handler"
             role: "{{lambda_role}}"
-            zip_file: "{{check_zip_res.dest}}"
+            zip_file: "{{lambda_builddir}}/{{check_lambda_name}}.zip"
             vpc_security_group_ids: "{{origin_db_result.vpc_security_groups | map(attribute='vpc_security_group_id')| list}}"
             vpc_subnet_ids: "{{origin_db_result.db_subnet_group.subnets | map(attribute='subnet_identifier')| list}}"
             timeout: 30
