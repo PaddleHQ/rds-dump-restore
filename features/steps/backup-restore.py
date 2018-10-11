@@ -142,3 +142,18 @@ def step_impl(context):
 @then(u'the production database should not be modified')
 def step_impl(context):
     raise NotImplementedError(u'STEP: Then the production database should not be modified')
+
+
+@given(u'I have a private public key pair')
+def step_impl(context):
+    raise NotImplementedError(u'STEP: Given I have a private public key pair')
+
+
+@when(u'I run a backup on the database using the public key')
+def step_impl(context):
+    raise NotImplementedError(u'STEP: When I run a backup on the database using the public key')
+
+
+@when(u'I restore that backup to a new database using the private key')
+def step_impl(context):
+    raise NotImplementedError(u'STEP: When I restore that backup to a new database using the private key' )

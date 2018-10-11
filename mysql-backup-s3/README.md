@@ -38,4 +38,4 @@ More information about the scheduling can be found [here](http://godoc.org/githu
 
 ## License and History
 
-This is based on [schickling/dockerfiles](https://github.com/schickling/dockerfiles/tree/master/mysql-backup-s3) and so the code in this directory is licensed under the MIT license.  
+This is based on [schickling/dockerfiles](https://github.com/schickling/dockerfiles/tree/master/mysql-backup-s3) and so the code in this directory is licensed under the MIT license.

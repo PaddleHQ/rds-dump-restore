@@ -1,0 +1,9 @@
+boto3
+PyHamcrest
+behave
+boto
+mysql-connector-python
+python-dotenv
+flake8
+autopep8
+yamllint
