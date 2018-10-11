@@ -2,6 +2,9 @@
 
 Backup MySQL to S3 (supports periodic backups & mutli files)
 
+This is based on https://github.com/schickling/dockerfiles/tree/master/mysql-backup-s3 
+
+
 ## Basic usage
 
 ```sh
@@ -32,3 +35,7 @@ $ docker run -e S3_ACCESS_KEY_ID=key -e S3_SECRET_ACCESS_KEY=secret -e S3_BUCKET
 You can additionally set the `SCHEDULE` environment variable like `-e SCHEDULE="@daily"` to run the backup automatically.
 
 More information about the scheduling can be found [here](http://godoc.org/github.com/robfig/cron#hdr-Predefined_schedules).
+
+## License and History
+
+This is based on [schickling/dockerfiles](https://github.com/schickling/dockerfiles/tree/master/mysql-backup-s3) and so the code in this directory is licensed under the MIT license.  

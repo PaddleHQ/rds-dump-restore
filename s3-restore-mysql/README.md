@@ -1,11 +1,12 @@
 # mysql-backup-s3
 
-Backup MySQL to S3 (supports periodic backups & mutli files)
+Restore an RDS MySQL or MariadDB instance from a dump file in S3
 
 ## Basic usage
 
+
 ```sh
-$ docker run -e S3_ACCESS_KEY_ID=key -e S3_SECRET_ACCESS_KEY=secret -e S3_BUCKET=my-bucket -e S3_PREFIX=backup -e MYSQL_USER=user -e MYSQL_PASSWORD=password -e MYSQL_HOST=localhost schickling/mysql-backup-s3
+$ docker run -e S3_ACCESS_KEY_ID=key -e S3_SECRET_ACCESS_KEY=secret -e S3_BUCKET=my-bucket -e S3_PREFIX=backup -e MYSQL_USER=user -e MYSQL_PASSWORD=password -e MYSQL_HOST=localhost paddlehq/s3-restore-mysql
 ```
 
 ## Environment variables
@@ -27,8 +28,6 @@ $ docker run -e S3_ACCESS_KEY_ID=key -e S3_SECRET_ACCESS_KEY=secret -e S3_BUCKET
 - `MULTI_FILES` Allow to have one file per database if set `yes` default: no)
 - `SCHEDULE` backup schedule time, see explainatons below
 
-### Automatic Periodic Backups
+## Basic usage
 
-You can additionally set the `SCHEDULE` environment variable like `-e SCHEDULE="@daily"` to run the backup automatically.
-
-More information about the scheduling can be found [here](http://godoc.org/github.com/robfig/cron#hdr-Predefined_schedules).
+This is based on [schickling/dockerfiles](https://github.com/schickling/dockerfiles/tree/master/mysql-backup-s3) combined with the postgres restore from the same collection and some small local changes so the code in this directory is licensed under the MIT license.  
