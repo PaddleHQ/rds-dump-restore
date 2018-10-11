@@ -4,3 +4,5 @@
 aws_credentials*
 *password*
 \#*
+*environment
+*postfix

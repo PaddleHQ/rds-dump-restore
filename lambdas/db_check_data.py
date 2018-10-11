@@ -45,6 +45,7 @@ def handler(event, context):
 
     testdata = event["testdata"]
 
+    print("connecting to host: %s for database: %s as user: %s" % (host, database, user))
     cnx = mysql.connector.connect(user=user, password=password, host=host,
                                   database=database, connection_timeout=5)
     try:
@@ -57,7 +58,7 @@ def handler(event, context):
     finally:
         cnx.close()
 
-    assert_that(result[1], equal_to(testdata))
+    assert_that(result[0][0], equal_to(testdata))
     return {"result": "found test data: " + testdata + " as expected in database"}
 
 

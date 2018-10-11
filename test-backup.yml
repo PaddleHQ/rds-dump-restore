@@ -12,20 +12,27 @@
 #
 
 
-
 # Security comment:
 #
 # the username and password here are generated locally in this file 
 #
 
+# BUG: security tokens are commented out in this code; Instead they
+# should be nulled if an empty token comes in.  Otherwise they get
+# passed on to the module as the empty string and everything breaks.
 
 
 - hosts: localhost
   vars_files:
-    - "aws_credentials_{{aws_account_name}}.yml"
+    # the following isloaded with include_vars so it can appear after we
+    # have started
+    # - "{{ backup_credentials_file }}" 
+    - "{{ admin_credentials_file }}"
   vars:
-    aws_account_name: michael
     ansible_connection: local
+    aws_account_name: michael
+    admin_credentials_file: "aws_credentials_{{aws_account_name}}_admin.yml"
+    backup_credentials_file: "aws_credentials_{{aws_account_name}}_backup.yml"
     set_lambda_name: db_set_data
     check_lambda_name: db_check_data
     lambdas:
@@ -34,9 +41,15 @@
     lambda_function_name: cf-security-group-update-test
     lambda_handler: "{{lambda_name}}.lambda_handler"
     lambda_role: "arn:aws:iam::{{aws_account}}:role/database_backup_testing"
+    s3_bucket_name: "backup-test-{{ lookup('password', '.bucketpostfix chars=ascii_lowercase,digits length=15') }}"
     output_dir: ~/ansible_testing
+    creds_tempfile: "{{output_dir}}/id_output"
     lambda_builddir: "{{output_dir| expanduser}}/db_verify_lambdas"
     vpc_id: null
+    password: "{{ lookup('password', '.mysqlpassword length=15') }}"
+    mysql_user:
+      name: test
+      password: "{{ lookup('password', '.mysqlpassword length=15') }}"
     origin_database_defs: &origin_database_defs
       id: test-encrypted-db
       engine: mariadb
@@ -55,62 +68,127 @@
       username: "{{ mysql_user.name }}"
       password: "{{ mysql_user.password }}"
       allocated_storage: 10
-    mysql_user:
-      name: test
-      password: "{{ lookup('password', '.mysqlpassword length=15') }}"
+    aws_admin_connection_info: &aws_admin_connection_info
+      aws_region: '{{ aws_region }}'
+      aws_access_key: '{{ admin_aws_access_key }}'
+      aws_secret_key: '{{ admin_aws_secret_key }}'
+      # security_token: '{{ admin_security_token }}'
+    aws_admin_connection_env: &aws_admin_connection_env
+      AWS_ACCESS_KEY_ID: '{{admin_aws_access_key}}'
+      AWS_SECRET_ACCESS_KEY: '{{admin_aws_secret_key}}'
+      AWS_DEFAULT_REGION: '{{aws_region}}'
+      # AWS_SESSION_TOKEN: '{{security_token}}'
 
   tasks:
-    - name: set up AWS credentials
-      block:
-        - set_fact:
-            aws_connection_info: &aws_connection_info
-              aws_region: '{{ aws_region }}'
-              aws_access_key: '{{ aws_access_key }}'
-              aws_secret_key: '{{ aws_secret_key }}'
-              security_token: '{{ security_token }}'
-          no_log: true
-
     - tags:
         - parallel database creation
       block:
 
-        - name: create minimal aurora instance in default VPC and default subnet group
+        - name: start creating minimal aurora origin instance
           rds_instance:
             state: present
             <<: *origin_database_defs
-            <<: *aws_connection_info
+            <<: *aws_admin_connection_info
             wait: no
 
-        - name: create minimal aurora instance in default VPC and default subnet group
+        - name: start creating minimal aurora target instance for restore
           rds_instance:
             state: present
             <<: *restore_database_defs
-            <<: *aws_connection_info
+            <<: *aws_admin_connection_info
             wait: no
 
+
     - tags:
-        - given that I have a mysql type database
-        - given that I have verification lambdas prepared
+        - given I have IAM configured for backups
       block:
 
-        - name: create minimal aurora instance in default VPC and default subnet group
+        - iam_user:
+            name: automated_backup_operator
+            managed_policy:
+              - arn:aws:iam::aws:policy/AWSLambdaFullAccess
+              - arn:aws:iam::aws:policy/IAMFullAccess
+              - arn:aws:iam::aws:policy/AmazonEC2FullAccess
+            state: present
+            <<: *aws_admin_connection_info
+
+        - script: get-only-access-key.sh automated_backup_operator 
+            # important - we don't actually create the file - it's the
+            # copy command below which does that.
+          args: 
+              creates: "{{creds_tempfile}}"
+          environment:
+            <<: *aws_admin_connection_env
+          register: cred_create_result
+
+        - copy:
+            content: |
+              ---
+              aws_region: {{ aws_region }}
+              backup_aws_access_key: {{(cred_create_result.stdout | from_json).AccessKey.AccessKeyId}}
+              backup_aws_secret_key: {{(cred_create_result.stdout | from_json).AccessKey.SecretAccessKey}}
+              backup_security_token:
+            dest: "{{creds_tempfile}}"
+          when: cred_create_result is success
+
+        - fetch:
+            src: "{{creds_tempfile}}"
+            dest: "{{ backup_credentials_file }}"
+            flat: yes
+          when: cred_create_result is success
+          register: cred_fetch_result
+
+        - tags:
+            - always
+          include_vars:
+            file: "{{ backup_credentials_file }}"
+
+        - tags:
+            - always
+          set_fact:
+            aws_backup_connection_info: &aws_backup_connection_info
+              aws_region: '{{ aws_region }}'
+              aws_access_key: '{{ backup_aws_access_key }}'
+              aws_secret_key: '{{ backup_aws_secret_key }}'
+              # security_token: '{{ backup_security_token }}'
+          no_log: true
+
+    - tags:
+        - given I have a mysql type database
+        - given I have verification lambdas prepared
+        - given that I have configured environment definitions
+      block:
+
+        - name: ensure origin database is creted and gather config
           rds_instance:
             state: running
             <<: *origin_database_defs
-            <<: *aws_connection_info
+            <<: *aws_admin_connection_info
           register: origin_db_result
 
     - tags:
         - create restore database
-        - given that I have verification lambdas prepared
+        - given I have verification lambdas prepared
+        - given that I have configured environment definitions
       block:
 
+        # FIXME? arguably this should switch to using the backup security credentials
         - name: create minimal aurora instance in default VPC and default subnet group
           rds_instance:
             state: running
             <<: *restore_database_defs
-            <<: *aws_connection_info
+            <<: *aws_admin_connection_info
           register: restore_db_result
+
+
+    - tags:
+        - given I have an s3 bucket set up for backup use
+        - given that I have configured environment definitions
+      block:
+        - name: create the s3 bucket
+          s3_bucket:
+            name: "{{s3_bucket_name}}"
+            <<: *aws_admin_connection_info
 
 
     - name: Get the current caller identity facts and set variables
@@ -118,15 +196,15 @@
         - always
       block:
         - aws_caller_facts:
-            <<: *aws_connection_info
+            <<: *aws_admin_connection_info
           register: caller_facts
 
         - set_fact:
             aws_account: "{{caller_facts.account}}"
 
     - tags:
-        - given that I have correct IAM definitions in place
-        - given that I have verification lambdas prepared
+        - given I have correct IAM definitions in place
+        - given I have verification lambdas prepared
       block:
         - iam_role:
             name: database_backup_testing
@@ -137,7 +215,7 @@
             assume_role_policy_document: "{{ lookup('file','assume-lambda-role-policy.json') }}"
 
     - tags:
-        - given that I have verification lambdas prepared
+        - given I have verification lambdas prepared
       block:
 
         - name: move lambdas into output dir for clean building
@@ -160,7 +238,7 @@
             vpc_security_group_ids: "{{origin_db_result.vpc_security_groups | map(attribute='vpc_security_group_id')| list}}"
             vpc_subnet_ids: "{{origin_db_result.db_subnet_group.subnets | map(attribute='subnet_identifier')| list}}"
             timeout: 30
-            <<: *aws_connection_info
+            <<: *aws_admin_connection_info
             environment_variables:
               DB_HOST: "{{origin_db_result.endpoint.address}}"
               DB_PORT: "{{origin_db_result.endpoint.port}}"
@@ -179,7 +257,7 @@
             vpc_security_group_ids: "{{origin_db_result.vpc_security_groups | map(attribute='vpc_security_group_id')| list}}"
             vpc_subnet_ids: "{{origin_db_result.db_subnet_group.subnets | map(attribute='subnet_identifier')| list}}"
             timeout: 30
-            <<: *aws_connection_info
+            <<: *aws_admin_connection_info
             environment_variables:
               DB_HOST: "{{restore_db_result.endpoint.address}}"
               DB_PORT: "{{restore_db_result.endpoint.port}}"
@@ -188,4 +266,45 @@
               DB_DATABASE: "{{ mysql_user.name }}"
           register: check_lambda_result
 
+
+    - tags:
+        - given that I have configured environment definitions
+      block:
+        - name: given that I have backup environment definitions
+          copy:
+            content: |
+              # automatically generated environment definitions - run
+              #    ansible-playbook test-backup.yml
+              # to regenerate
+              S3_ACCESS_KEY_ID="{{ backup_aws_access_key }}"
+              S3_SECRET_ACCESS_KEY="{{ backup_aws_secret_key }}"
+              S3_BUCKET="{{ s3_bucket_name }}"
+              MYSQL_HOST="{{ origin_db_result.endpoint.address }}"
+              MYSQL_USER="{{ mysql_user.name }}"
+              MYSQL_PASSWORD="{{ mysql_user.password }}"
+              # the following are consumed starting fargate, not by the backup script
+              # FIX MAYBE ME  - in real life ypu might want to filter for active
+              DB_SECURITY_GROUP="{{origin_db_result.vpc_security_groups[0].vpc_security_group_id}}"
+              DB_SUBNET_ID="{{origin_db_result.db_subnet_group.subnets[0].subnet_identifier}}"
+              AWS_REGION="{{ aws_region }}"
+            dest: backup-task-environment
+
+        - name: given that I have restore environment definitions
+          copy:
+            content: |
+              # automatically generated environment definitions - run
+              #    ansible-playbook test-backup.yml
+              # to regenerate
+              S3_ACCESS_KEY_ID="{{ backup_aws_access_key }}"
+              S3_SECRET_ACCESS_KEY="{{ backup_aws_secret_key }}"
+              S3_BUCKET="{{ s3_bucket_name }}"
+              MYSQL_HOST={{ restore_db_result.endpoint.address }}
+              MYSQL_USER="{{ mysql_user.name }}"
+              MYSQL_PASSWORD="{{ mysql_user.password }}"
+              # the following are consumed starting fargate, not by the backup script
+              # FIX MAYBE ME  - in real life ypu might want to filter for active
+              DB_SECURITY_GROUP="{{restore_db_result.vpc_security_groups[0].vpc_security_group_id}}"
+              DB_SUBNET_ID="{{restore_db_result.db_subnet_group.subnets[0].subnet_identifier}}"
+              AWS_REGION="{{ aws_region }}"
+            dest: restore-task-environment
 

@@ -54,12 +54,18 @@ def handler(event, context):
                   "  PRIMARY KEY (`thekey`)"
                   ")")
         cursor.execute(create)
+        delete = ("DELETE FROM test_backup_restore "
+                  " WHERE `thekey` = 'testdata' ;")
+        cursor.execute(delete)
         insert = ("INSERT INTO test_backup_restore "
                   " ( `thekey`, `thevalue` )"
                   " VALUES "
                   " ( 'testdata', %s ) ;")
         cursor.execute(insert, (testdata,))
+        cnx.commit()
+
     finally:
+        cursor.close()
         cnx.close()
 
     return {"result": "inserted test data: " + testdata + " into database"}
