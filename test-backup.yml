@@ -1,0 +1,222 @@
+---
+#
+#  This is based on the lambda and lambda policy testcases out of Ansible's integration tests
+#
+#  As such it is licensed under the GPLv3 with copyright belonging to various including:
+#
+#  * Michael De La Rue
+#  * William Thames
+#  * The Ansible Project
+#
+#  Further work on this done as paid work by Michael De La Rue for paddle.com.
+#
+
+
+
+# Security comment:
+#
+# the username and password here are generated locally in this file 
+#
+
+
+
+- hosts: localhost
+  vars_files:
+    - "aws_credentials_{{aws_account_name}}.yml"
+  vars:
+    aws_account_name: michael
+    ansible_connection: local
+    set_lambda_name: db_set_data
+    check_lambda_name: db_check_data
+    lambdas:
+      - "{{set_lambda_name}}"
+      - "{{check_lambda_name}}"
+    lambda_function_name: cf-security-group-update-test
+    lambda_handler: "{{lambda_name}}.lambda_handler"
+    lambda_role: "arn:aws:iam::{{aws_account}}:role/database_backup_testing"
+    output_dir: ~/ansible_testing
+    vpc_id: null
+    origin_database_defs: &origin_database_defs
+      id: test-encrypted-db
+      engine: mariadb
+      storage_encrypted: True
+      db_instance_class: db.t2.medium
+      db_name: test
+      username: "{{ mysql_user.name }}"
+      password: "{{ mysql_user.password }}"
+      allocated_storage: 10
+    restore_database_defs: &restore_database_defs
+      id: test-restore-encrypted-db
+      engine: mariadb
+      storage_encrypted: True
+      db_instance_class: db.t2.medium
+      db_name: test
+      username: "{{ mysql_user.name }}"
+      password: "{{ mysql_user.password }}"
+      allocated_storage: 10
+    mysql_user:
+      name: test
+      password: "{{ lookup('password', '.mysqlpassword length=15') }}"
+
+  tasks:
+    - name: set up AWS credentials
+      block:
+        - set_fact:
+            aws_connection_info: &aws_connection_info
+              aws_region: '{{ aws_region }}'
+              aws_access_key: '{{ aws_access_key }}'
+              aws_secret_key: '{{ aws_secret_key }}'
+              security_token: '{{ security_token }}'
+          no_log: true2
+
+    - tags:
+        - parallel database creation
+      block:
+
+        - name: create minimal aurora instance in default VPC and default subnet group
+          rds_instance:
+            state: present
+            <<: *origin_database_defs
+            <<: *aws_connection_info
+            wait: no
+
+        - name: create minimal aurora instance in default VPC and default subnet group
+          rds_instance:
+            state: present
+            <<: *restore_database_defs
+            <<: *aws_connection_info
+            wait: no
+
+    - tags:
+        - given that I have a mysql type database
+        - given that I have verification lambdas prepared
+      block:
+
+        - name: create minimal aurora instance in default VPC and default subnet group
+          rds_instance:
+            state: running
+            <<: *origin_database_defs
+            <<: *aws_connection_info
+          register: origin_db_result
+
+    - tags:
+        - create restore database
+        - given that I have verification lambdas prepared
+      block:
+
+        - name: create minimal aurora instance in default VPC and default subnet group
+          rds_instance:
+            state: running
+            <<: *restore_database_defs
+            <<: *aws_connection_info
+          register: restore_db_result
+
+
+    - name: Get the current caller identity facts and set variables
+      tags:
+        - always
+      block:
+        - aws_caller_facts:
+            <<: *aws_connection_info
+          register: caller_facts
+
+        - set_fact:
+            aws_account: "{{caller_facts.account}}"
+
+    - tags:
+        - given that I have correct IAM definitions in place
+        - given that I have verification lambdas prepared
+      block:
+        - iam_role:
+            name: database_backup_testing
+            managed_policy:
+              - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
+              - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+            state: present
+            assume_role_policy_document: "{{ lookup('file','assume-lambda-role-policy.json') }}"
+
+    - tags:
+        - given that I have verification lambdas prepared
+      block:
+
+        - name: ensure that output dirs exist
+          file:
+            path: "{{output_dir}}/{{item}}"
+            state: directory
+            mode: 0775
+          with_items:
+            "{{lambdas}}"
+
+        # ============================================================
+        # direct zip file upload
+        - name: move lambda into place for archive module
+          copy:
+            src: "{{item}}.py"
+            dest: "{{output_dir}}/{{item}}/{{item}}.py"
+          with_items:
+            "{{lambdas}}"
+
+        - name: move lambda into place for archive module
+          copy:
+            src: "requirements.txt"
+            dest: "{{output_dir}}/requirements.txt"
+
+        - name: setup libraries
+          command: "pip install -t {{output_dir}}/{{item}} -r {{output_dir}}/requirements.txt"
+          with_items:
+              "{{lambdas}}"
+          delegate_to: localhost
+
+        - name: bundle set lambda into a zip
+          archive:
+            format: zip
+            path: "{{output_dir}}/{{set_lambda_name}}/."
+            dest: "{{output_dir}}/{{set_lambda_name}}.zip"
+          register: set_zip_res
+
+        - name: bundle check lambda into a zip
+          archive:
+            format: zip
+            path: "{{output_dir}}/{{check_lambda_name}}/."
+            dest: "{{output_dir}}/{{check_lambda_name}}.zip"
+          register: check_zip_res
+
+        - name: ensure setter lambda is uploaded and configured for db
+          lambda:
+            name: "{{set_lambda_name}}"
+            runtime: "python3.6"
+            handler: "{{set_lambda_name}}.handler"
+            role: "{{lambda_role}}"
+            zip_file: "{{set_zip_res.dest}}"
+            vpc_security_group_ids: "{{origin_db_result.vpc_security_groups | map(attribute='vpc_security_group_id')| list}}"
+            vpc_subnet_ids: "{{origin_db_result.db_subnet_group.subnets | map(attribute='subnet_identifier')| list}}"
+            timeout: 30
+            <<: *aws_connection_info
+            environment_variables:
+              DB_HOST: "{{origin_db_result.endpoint.address}}"
+              DB_PORT: "{{origin_db_result.endpoint.port}}"
+              DB_USER: "{{ mysql_user.name }}"
+              DB_PASSWORD: "{{ mysql_user.password }}"
+              DB_DATABASE: "{{ mysql_user.name }}"
+          register: set_lambda_result
+
+        - name: ensure check lambda is uploaded and configured for db
+          lambda:
+            name: "{{check_lambda_name}}"
+            runtime: "python3.6"
+            handler: "{{check_lambda_name}}.handler"
+            role: "{{lambda_role}}"
+            zip_file: "{{check_zip_res.dest}}"
+            vpc_security_group_ids: "{{origin_db_result.vpc_security_groups | map(attribute='vpc_security_group_id')| list}}"
+            vpc_subnet_ids: "{{origin_db_result.db_subnet_group.subnets | map(attribute='subnet_identifier')| list}}"
+            timeout: 30
+            <<: *aws_connection_info
+            environment_variables:
+              DB_HOST: "{{restore_db_result.endpoint.address}}"
+              DB_PORT: "{{restore_db_result.endpoint.port}}"
+              DB_USER: "{{ mysql_user.name }}"
+              DB_PASSWORD: "{{ mysql_user.password }}"
+              DB_DATABASE: "{{ mysql_user.name }}"
+          register: check_lambda_result
+
+

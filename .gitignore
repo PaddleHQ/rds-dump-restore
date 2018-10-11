@@ -1,0 +1,6 @@
+*.retry
+*~
+*venv
+aws_credentials*
+*password*
+\#*
