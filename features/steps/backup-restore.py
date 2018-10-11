@@ -4,7 +4,7 @@ import subprocess
 import sys
 import random
 import string
-from hamcrest import assert_that, equal_to, is_not
+from hamcrest import assert_that, equal_to, not_, has_key
 from subprocess import run
 import boto3
 
@@ -61,7 +61,7 @@ def step_impl(context):
         Payload=payload
     )
     assert_that(response["StatusCode"], equal_to(200))
-    assert_that(response["FunctionError"], is_not(equal_to("Unhandled")))
+    assert_that(response, not_(has_key("FunctionError")))
 
 
 @then(u'the data from the original database should be in the new database')
@@ -75,7 +75,7 @@ def step_impl(context):
         Payload=payload
     )
     assert_that(response["StatusCode"], equal_to(200))
-    assert_that(response["FunctionError"], is_not(equal_to("Unhandled")))
+    assert_that(response, not_(has_key("FunctionError")))
 
 
 @when(u'I restore that backup to a new database')

@@ -2,7 +2,6 @@ from __future__ import print_function
 import json
 import os
 import mysql.connector
-from hamcrest import assert_that, equal_to
 
 """db_check_lambda - check that a database is actually correctly restored
 
@@ -49,17 +48,20 @@ def handler(event, context):
                                   database=database, connection_timeout=5)
     try:
         cursor = cnx.cursor()
-        query = ("INSERT INTO test_backup_restore "
-                 " ( `thekey`, `thevalue` )"
-                 " VALUES "
-                 " ( 'testdata', %s ) ;")
-        cursor.execute(query, (testdata,))
-        result = cursor.fetchall()
-        print(result)
+        create = ("CREATE TABLE IF NOT EXISTS `test_backup_restore` ("
+                  "  `thekey` varchar(20) NOT NULL,"
+                  "  `thevalue` varchar(40) NOT NULL,"
+                  "  PRIMARY KEY (`thekey`)"
+                  ")")
+        cursor.execute(create)
+        insert = ("INSERT INTO test_backup_restore "
+                  " ( `thekey`, `thevalue` )"
+                  " VALUES "
+                  " ( 'testdata', %s ) ;")
+        cursor.execute(insert, (testdata,))
     finally:
         cnx.close()
 
-    assert_that(result[1], equal_to(testdata))
     return {"result": "inserted test data: " + testdata + " into database"}
 
 

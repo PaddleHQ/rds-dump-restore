@@ -50,7 +50,7 @@ def handler(event, context):
     try:
         cursor = cnx.cursor()
         cursor.execute("""
-          SELECT value FROM test_backup_restore WHERE key = 'testdata'
+          SELECT `thevalue` FROM test_backup_restore WHERE `thekey` = 'testdata' ;
        """)
         result = cursor.fetchall()
         print(result)
