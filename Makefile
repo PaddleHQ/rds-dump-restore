@@ -1,6 +1,5 @@
-test:
+test: containers lint
 	behave --tags '~@future'
-
 wip:
 	behave --wip
 
@@ -9,6 +8,7 @@ lint:
 	find . -name '*.py' | xargs flake8 --max-line-length=100 --builtins=given,when,then \
 		--ignore=F811
 	find . -name '*.yaml' -name '*.yml' | xargs yamllint
+	find . -name '*.sh'  | xargs shellcheck --format=gcc
 
 testfix:
 	find . -name '*.py' | xargs autopep8 --aggressive --max-line-length=100 --diff
@@ -16,10 +16,6 @@ testfix:
 fix:
 	find . -name '*.py' | xargs autopep8 --aggressive --max-line-length=100 --in-place
 
-
-containers:
-	docker build mysql-backup-s3 -t paddlehq/mysql-backup-s3
-	docker build s3-restore-mysql -t paddlehq/s3-restore-mysql
-	docker image push paddlehq/mysql-backup-s3
-	docker image push paddlehq/s3-restore-mysql
-
+containers: 
+	$(MAKE) -C mysql-backup-s3
+	$(MAKE) -C s3-restore-mysql

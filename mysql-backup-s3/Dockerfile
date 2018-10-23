@@ -1,5 +1,5 @@
 FROM alpine:latest
-LABEL maintainer="Johannes Schickling <schickling.j@gmail.com>"
+LABEL maintainer="Michael De La Rue <estodoimg.xklesae@spamgourmet.com>"
 
 ADD install.sh install.sh
 RUN sh install.sh && rm install.sh
@@ -24,6 +24,7 @@ ENV S3_PREFIX 'backup'
 ENV S3_FILENAME **None**
 ENV MULTI_FILES no
 ENV SCHEDULE **None**
+ENV PUBLIC_KEY **None**
 
 ADD run.sh run.sh
 ADD backup.sh backup.sh

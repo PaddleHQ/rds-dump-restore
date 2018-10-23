@@ -3,11 +3,13 @@
 # exit if a command fails
 set -e
 
-
 apk update
 
 # install mysqldump
 apk add mysql-client
+
+# install crypto tools
+apk add gnupg
 
 # install s3 tools
 apk add python py-pip

@@ -3,7 +3,7 @@ CHECK_LAMBDA=db_check_data
 
 zipfiles: $(SET_LAMBDA).zip $(CHECK_LAMBDA).zip
 
-base_libraries.zip:
+base_libraries.zip: requirements.txt
 	mkdir -p libraries
 	pip install -t libraries -r requirements.txt
 	cd libraries ; \
@@ -15,4 +15,4 @@ $(SET_LAMBDA).zip: base_libraries.zip $(SET_LAMBDA).py
 $(CHECK_LAMBDA).zip: base_libraries.zip $(SET_LAMBDA).py
 	zip base_libraries.zip -O $(CHECK_LAMBDA).zip $(CHECK_LAMBDA).py
 
-.PHONY: zipfiles base_libraries.zip
+.PHONY: zipfiles

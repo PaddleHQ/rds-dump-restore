@@ -8,3 +8,7 @@ aws_credentials*
 *postfix
 .#*
 
+*.pub
+gpgtemp
+keys/
+build

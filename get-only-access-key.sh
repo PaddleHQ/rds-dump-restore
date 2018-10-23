@@ -20,9 +20,9 @@ fi
 
 set -vx
 
-( for i in $(aws iam list-access-keys  --user-name=$username | grep AccessKeyId | sed -e 's/",//' -e 's/.*"//' ) 
+( for i in $(aws iam list-access-keys  --user-name="$username" | grep AccessKeyId | sed -e 's/",//' -e 's/.*"//' ) 
 do
-    aws iam delete-access-key  --user-name=$username --access-key-id=$i
+    aws iam delete-access-key  --user-name="$username" --access-key-id="$i"
 done ) >&2
 
-aws iam create-access-key --user-name=$username
+aws iam create-access-key --user-name="$username"

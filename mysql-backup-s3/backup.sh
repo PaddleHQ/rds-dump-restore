@@ -1,33 +1,33 @@
-#! /bin/sh
+#!/bin/sh
 
 echo "Backup script started"
 
 set -e
 
-if [ "${S3_ACCESS_KEY_ID}" == "**None**" ]; then
+if [ "${S3_ACCESS_KEY_ID}" = "**None**" ]; then
   echo "Warning: You did not set the S3_ACCESS_KEY_ID environment variable."
 fi
 
-if [ "${S3_SECRET_ACCESS_KEY}" == "**None**" ]; then
+if [ "${S3_SECRET_ACCESS_KEY}" = "**None**" ]; then
   echo "Warning: You did not set the S3_SECRET_ACCESS_KEY environment variable."
 fi
 
-if [ "${S3_BUCKET}" == "**None**" ]; then
+if [ "${S3_BUCKET}" = "**None**" ]; then
   echo "You need to set the S3_BUCKET environment variable."
   exit 1
 fi
 
-if [ "${MYSQL_HOST}" == "**None**" ]; then
+if [ "${MYSQL_HOST}" = "**None**" ]; then
   echo "You need to set the MYSQL_HOST environment variable."
   exit 1
 fi
 
-if [ "${MYSQL_USER}" == "**None**" ]; then
+if [ "${MYSQL_USER}" = "**None**" ]; then
   echo "You need to set the MYSQL_USER environment variable."
   exit 1
 fi
 
-if [ "${MYSQL_PASSWORD}" == "**None**" ]; then
+if [ "${MYSQL_PASSWORD}" = "**None**" ]; then
   echo "You need to set the MYSQL_PASSWORD environment variable or link to a container named MYSQL."
   exit 1
 fi
@@ -39,71 +39,117 @@ if [ "${S3_IAMROLE}" != "true" ]; then
   export AWS_DEFAULT_REGION=$S3_REGION
 fi
 
-MYSQL_HOST_OPTS="-h $MYSQL_HOST -P $MYSQL_PORT -u$MYSQL_USER -p$MYSQL_PASSWORD"
-DUMP_START_TIME=$(date +"%Y-%m-%dT%H%M%SZ")
+my_mysql() {
+    mysql -h "$MYSQL_HOST" -P "$MYSQL_PORT" -u"$MYSQL_USER" -p"$MYSQL_PASSWORD" "$@"
+}
+
+my_mysqldump() {
+    # ash shell does not support arrays and we need to get the mysql dump
+    # options in from the docker file so the least nasty way to do this is, to
+    # have an unquoted variable as far as I can see.  Make sure it doesn't come
+    # in from an untrusted source, which, in the original application I assume
+    # it can't.
+    # 
+    # shellcheck disable=SC2086
+    mysqldump "$MYSQL_HOST" -P "$MYSQL_PORT" -u"$MYSQL_USER" -p"$MYSQL_PASSWORD" $MYSQLDUMP_OPTIONS "$@"
+}
+
+dump_to_file() {
+    ( set -o pipefail
+    THE_DB=$1
+    THE_DUMP_FILE=$2
+    if [ "${ENCRYPT}" = "false" ]
+    then
+	my_mysqldump --databases "$THE_DB" | gzip > "$THE_DUMP_FILE"
+    else
+	my_mysqldump --databases "$THE_DB" | gzip -9 |
+	      gpg --homedir /tmp/gnupg --recipient "${KEYID}" --encrypto > "$THE_DUMP_FILE"
+    fi )
+}
+
+if [ "${S3_FILENAME}" = "**None**" ]
+then
+    S3_FILENAME=$(date +"%Y-%m-%dT%H%M%SZ")
+fi
+
+SUFFIX=".sql.gz"
+if [ "${PUBLIC_KEY}" = "**None**" ];
+then
+    ENCRYPT="false"
+else
+    SUFFIX="$SUFFIX.gpg"
+    ENCRYPT="true"
+
+    # we do want to convert newlines since public keys need them but we
+    # don't really want other sequences such as %s since they might
+    # appear accidentally;  for now use echo -e but maybe it should be
+    # echo | sed ? something based on printf?
+    # shellcheck disable=SC2039
+    echo -e "${PUBLIC_KEY}" >  my.pub
+    # based on
+    # https://security.stackexchange.com/questions/86721
+    umask 077
+    mkdir -p /tmp/gnupg
+    gpg --homedir /tmp/gnupg --import my.pub
+    KEYID=$(gpg --batch --with-colons /tmp/a4ff2279.pgp | head -n1 | cut -d: -f5)
+fi
+
 
 copy_s3 () {
   SRC_FILE=$1
   DEST_FILE=$2
 
-  if [ "${S3_ENDPOINT}" == "**None**" ]; then
+  if [ "${S3_ENDPOINT}" = "**None**" ]; then
     AWS_ARGS=""
   else
     AWS_ARGS="--endpoint-url ${S3_ENDPOINT}"
   fi
 
-  echo "Uploading ${DEST_FILE} on S3..."
+  echo "Uploading ${DEST_FILE} to S3..."
 
-  cat $SRC_FILE | aws $AWS_ARGS s3 cp - s3://$S3_BUCKET/$S3_PREFIX/$DEST_FILE
+  
 
-  if [ $? != 0 ]; then
-    >&2 echo "Error uploading ${DEST_FILE} on S3"
+  if ! aws "${AWS_ARGS}" s3 cp "${SRC_FILE}" "s3://${S3_BUCKET}/${S3_PREFIX}/${DEST_FILE}" 
+  then
+    >&2 echo "Error uploading ${DEST_FILE} to S3"
   fi
 
-  rm $SRC_FILE
+  rm "${SRC_FILE}"
 }
-# Multi file: yes
-if [ ! -z "$(echo $MULTI_FILES | grep -i -E "(yes|true|1)")" ]; then
-  if [ "${MYSQLDUMP_DATABASE}" == "--all-databases" ]; then
-    DATABASES=`mysql $MYSQL_HOST_OPTS -e "SHOW DATABASES;" | grep -Ev "(Database|information_schema|performance_schema|mysql|sys|innodb)"`
+
+if echo "${MULTI_FILES}" | grep -q -i -E "(yes|true|1)"
+then
+  # Multi file: yes
+  if [ "${MYSQLDUMP_DATABASE}" = "--all-databases" ]; then
+    DATABASES=$(my_mysql -e "SHOW DATABASES;" | grep -Ev "(Database|information_schema|performance_schema|mysql|sys|innodb)")
   else
-    DATABASES=$MYSQLDUMP_DATABASE
+    DATABASES="$MYSQLDUMP_DATABASE"
   fi
 
   for DB in $DATABASES; do
     echo "Creating individual dump of ${DB} from ${MYSQL_HOST}..."
 
-    DUMP_FILE="/tmp/${DB}.sql.gz"
+    S3_FILE="${S3_FILENAME}.${DB}.${SUFFIX}"
+    DUMP_FILE="/tmp/${DB}.${SUFFIX}"
 
-    mysqldump $MYSQL_HOST_OPTS $MYSQLDUMP_OPTIONS --databases $DB | gzip > $DUMP_FILE
 
-    if [ $? == 0 ]; then
-      if [ "${S3_FILENAME}" == "**None**" ]; then
-        S3_FILE="${DUMP_START_TIME}.${DB}.sql.gz"
-      else
-        S3_FILE="${S3_FILENAME}.${DB}.sql.gz"
-      fi
-
-      copy_s3 $DUMP_FILE $S3_FILE
+    if dump_to_file "${DB}" "${DUMP_FILE}"
+    then
+      copy_s3 "$DUMP_FILE" "$S3_FILE"
     else
       >&2 echo "Error creating dump of ${DB}"
     fi
   done
-# Multi file: no
 else
+  # Multi file: no
   echo "Creating dump for ${MYSQLDUMP_DATABASE} from ${MYSQL_HOST}..."
 
-  DUMP_FILE="/tmp/dump.sql.gz"
-  mysqldump $MYSQL_HOST_OPTS $MYSQLDUMP_OPTIONS $MYSQLDUMP_DATABASE | gzip > $DUMP_FILE
+  S3_FILE="${S3_FILENAME}.${SUFFIX}"
+  DUMP_FILE="/tmp/dump.${SUFFIX}"
 
-  if [ $? == 0 ]; then
-    if [ "${S3_FILENAME}" == "**None**" ]; then
-      S3_FILE="${DUMP_START_TIME}.dump.sql.gz"
-    else
-      S3_FILE="${S3_FILENAME}.sql.gz"
-    fi
-
-    copy_s3 $DUMP_FILE $S3_FILE
+  if dump_to_file "${MYSQLDUMP_DATABASE}" "${DUMP_FILE}"
+  then
+    copy_s3 "$DUMP_FILE" "$S3_FILE"
   else
     >&2 echo "Error creating dump of all databases"
   fi

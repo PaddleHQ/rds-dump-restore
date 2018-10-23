@@ -14,14 +14,16 @@ In order to be able to restore the mysql database
    @wip
    Scenario: backup the database with encryption then restore with decryption
    given I have a private public key pair
+     and that my s3 bucket is empty
     when I run a backup on the database using the public key
      and I restore that backup to a new database using the private key
-    then the data from the original database should be in the new database
+    then the s3 bucket should not contain unencrypted data
+     and the data from the original database should be in the new database
 
    @future
    Scenario: warn when given an encrypted database to restore
    given I have a public
-    when I run a backup on the database using the publik key
+    when I run a backup on the database using the public key
     when I attempt to restore that backup to a new database
     then I should get a warning that the backup is unreadable and a suggestion to try a key
 
