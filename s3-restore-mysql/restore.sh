@@ -54,22 +54,28 @@ my_mysql() {
 
 restore_from_file() {
     ( set -o pipefail
-    THE_DUMP_FILE=$2
+    THE_DUMP_FILE=$1
     if [ "${ENCRYPT}" = "false" ]
     then
 	# shellcheck disable=SC2016,SC2119
 	gzip -dc "$THE_DUMP_FILE" | sed -e '/-- Current Database: `mysql`/,/-- Current Database:/d' | my_mysql
     else
 	# shellcheck disable=SC2016,SC2119
-	gpg --homedir /tmp/gnupg --recipient "${KEYID}" --decrypt < "$THE_DUMP_FILE" | gzip -dc | sed -e '/-- Current Database: `mysql`/,/-- Current Database:/d' | my_mysql
+	gpg --homedir "${GPG_HOME_DIR}" --decrypt < "$THE_DUMP_FILE" | gzip -dc | sed -e '/-- Current Database: `mysql`/,/-- Current Database:/d' | my_mysql
     fi )
 }
 
+SUFFIX="sql.gz"
 if [ "${PRIVATE_KEY}" = "**None**" ];
 then
     ENCRYPT="false"
 else
+    umask 077
+    GPG_HOME_DIR=$(mktemp -d)
+    export GPG_HOME_DIR
     ENCRYPT="true"
+    SUFFIX="$SUFFIX.gpg"
+
     # we do want to convert newlines since public keys need them but we
     # don't really want other sequences such as %s since they might
     # appear accidentally;  for now use echo -e but maybe it should be
@@ -78,8 +84,7 @@ else
     echo -e "${PRIVATE_KEY}" >  my.pri
     # based on
     # https://security.stackexchange.com/questions/86721
-    gpg --homedir /tmp/gnupg --import my.pri
-    KEYID=$(gpg --batch --with-colons /tmp/a4ff2279.pgp | head -n1 | cut -d: -f5)
+    gpg --homedir "${GPG_HOME_DIR}" --import my.pri 
 fi
 
 echo "Finding latest backup"
@@ -88,8 +93,8 @@ LATEST_BACKUP=$(aws s3 ls s3://"$S3_BUCKET"/"$S3_PREFIX"/ | sort | tail -n 1 | a
 
 echo "Fetching ${LATEST_BACKUP} from S3"
 
-aws s3 cp "s3://$S3_BUCKET/$S3_PREFIX/${LATEST_BACKUP}" dump.sql.gz
-
+aws s3 cp "s3://$S3_BUCKET/$S3_PREFIX/${LATEST_BACKUP}" dump.sql.gz.gpg
+RESTOREFILE=dump.sql.gz.gpg
 # TODO:
 # echo "Restoring dump for ${MYSQLDUMP_DATABASE} to ${MYSQL_HOST}..."
 
@@ -97,9 +102,17 @@ echo "Restoring dump to ${MYSQL_HOST}..."
 
 set -o pipefail
 
-if restore_from_file dump.sql.gz
+FAILCODE=0
+if restore_from_file "${RESTOREFILE}"
 then
     echo "SQL restore finished"
 else
+    RET=$?
+    if [ "$RET" -gt "$FAILCODE" ]
+    then
+	FAILCODE="$RET"
+    fi
     echo "SQL restore failed!!!"
 fi
+
+exit $FAILCODE

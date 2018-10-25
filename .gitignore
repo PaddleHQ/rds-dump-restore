@@ -13,3 +13,6 @@ gpgtemp
 keys/
 build
 *.log
+dump.sql*
+*.pri
+mockstmp

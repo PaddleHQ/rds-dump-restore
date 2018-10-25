@@ -101,10 +101,11 @@ if [ "${PUBLIC_KEY}" = "**None**" ];
 then
     ENCRYPT="false"
 else
+    umask 077
     GPG_HOME_DIR=$(mktemp -d)
     export GPG_HOME_DIR
-    SUFFIX="$SUFFIX.gpg"
     ENCRYPT="true"
+    SUFFIX="$SUFFIX.gpg"
 
     # we do want to convert newlines since public keys need them but we
     # don't really want other sequences such as %s since they might
@@ -114,8 +115,6 @@ else
     echo -e "${PUBLIC_KEY}" >  my.pub
     # based on
     # https://security.stackexchange.com/questions/86721
-    umask 077
-    GPG_HOME_DIR=$(mktemp -d)
     gpg --homedir "${GPG_HOME_DIR}" --import my.pub
     KEYID=$(gpg --list-keys --with-colons --homedir "${GPG_HOME_DIR}" | grep pub | head -n1 | cut -d: -f5)
 fi
