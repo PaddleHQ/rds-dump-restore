@@ -12,3 +12,4 @@ aws_credentials*
 gpgtemp
 keys/
 build
+*.log

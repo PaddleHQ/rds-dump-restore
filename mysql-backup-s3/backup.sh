@@ -43,7 +43,7 @@ my_mysql() {
     mysql -h "$MYSQL_HOST" -P "$MYSQL_PORT" -u"$MYSQL_USER" -p"$MYSQL_PASSWORD" "$@"
 }
 
-my_mysqldump() {
+dump_chosen () {
     # ash shell does not support arrays and we need to get the mysql dump
     # options in from the docker file so the least nasty way to do this is, to
     # have an unquoted variable as far as I can see.  Make sure it doesn't come
@@ -51,19 +51,43 @@ my_mysqldump() {
     # it can't.
     # 
     # shellcheck disable=SC2086
-    mysqldump "$MYSQL_HOST" -P "$MYSQL_PORT" -u"$MYSQL_USER" -p"$MYSQL_PASSWORD" $MYSQLDUMP_OPTIONS "$@"
+    echo running mysqldump --host "$MYSQL_HOST" --port "$MYSQL_PORT" --user "$MYSQL_USER" --password="$MYSQL_PASSWORD" $MYSQLDUMP_OPTIONS --databases "$@" >&2
+    # shellcheck disable=SC2086
+    mysqldump --host "$MYSQL_HOST" --port "$MYSQL_PORT" --user "$MYSQL_USER" --password="$MYSQL_PASSWORD" $MYSQLDUMP_OPTIONS --databases "$@"
 }
+
+dump_all () {
+    # ash shell does not support arrays and we need to get the mysql dump
+    # options in from the docker file so the least nasty way to do this is, to
+    # have an unquoted variable as far as I can see.  Make sure it doesn't come
+    # in from an untrusted source, which, in the original application I assume
+    # it can't.
+    # 
+    # shellcheck disable=SC2086
+    echo running mysqldump --host "$MYSQL_HOST" --port "$MYSQL_PORT" --user "$MYSQL_USER" --password="$MYSQL_PASSWORD" $MYSQLDUMP_OPTIONS --all-databases >&2
+    # shellcheck disable=SC2086
+    mysqldump --host "$MYSQL_HOST" --port "$MYSQL_PORT" --user "$MYSQL_USER" --password="$MYSQL_PASSWORD" $MYSQLDUMP_OPTIONS --all-databases
+
+}
+
 
 dump_to_file() {
     ( set -o pipefail
     THE_DB=$1
     THE_DUMP_FILE=$2
+    if [ "--all-databases"  = "$THE_DB" ]
+    then
+	dump_command=dump_all
+    else
+	dump_command=dump_chosen
+    fi
+    
     if [ "${ENCRYPT}" = "false" ]
     then
-	my_mysqldump --databases "$THE_DB" | gzip > "$THE_DUMP_FILE"
+	"$dump_command" "$THE_DB" | gzip > "$THE_DUMP_FILE"
     else
-	my_mysqldump --databases "$THE_DB" | gzip -9 |
-	      gpg --homedir /tmp/gnupg --recipient "${KEYID}" --encrypto > "$THE_DUMP_FILE"
+	"$dump_command" "$THE_DB" | gzip -9 |
+	      gpg --homedir "${GPG_HOME_DIR}" --recipient "${KEYID}" --encrypt --trust-model always > "$THE_DUMP_FILE"
     fi )
 }
 
@@ -72,11 +96,13 @@ then
     S3_FILENAME=$(date +"%Y-%m-%dT%H%M%SZ")
 fi
 
-SUFFIX=".sql.gz"
+SUFFIX="sql.gz"
 if [ "${PUBLIC_KEY}" = "**None**" ];
 then
     ENCRYPT="false"
 else
+    GPG_HOME_DIR=$(mktemp -d)
+    export GPG_HOME_DIR
     SUFFIX="$SUFFIX.gpg"
     ENCRYPT="true"
 
@@ -89,9 +115,9 @@ else
     # based on
     # https://security.stackexchange.com/questions/86721
     umask 077
-    mkdir -p /tmp/gnupg
-    gpg --homedir /tmp/gnupg --import my.pub
-    KEYID=$(gpg --batch --with-colons /tmp/a4ff2279.pgp | head -n1 | cut -d: -f5)
+    GPG_HOME_DIR=$(mktemp -d)
+    gpg --homedir "${GPG_HOME_DIR}" --import my.pub
+    KEYID=$(gpg --list-keys --with-colons --homedir "${GPG_HOME_DIR}" | grep pub | head -n1 | cut -d: -f5)
 fi
 
 
@@ -107,9 +133,8 @@ copy_s3 () {
 
   echo "Uploading ${DEST_FILE} to S3..."
 
-  
-
-  if ! aws "${AWS_ARGS}" s3 cp "${SRC_FILE}" "s3://${S3_BUCKET}/${S3_PREFIX}/${DEST_FILE}" 
+  # shellcheck disable=SC2086
+  if ! aws ${AWS_ARGS} s3 cp "${SRC_FILE}" "s3://${S3_BUCKET}/${S3_PREFIX}/${DEST_FILE}" 
   then
     >&2 echo "Error uploading ${DEST_FILE} to S3"
   fi
@@ -117,6 +142,7 @@ copy_s3 () {
   rm "${SRC_FILE}"
 }
 
+FAILCODE=0
 if echo "${MULTI_FILES}" | grep -q -i -E "(yes|true|1)"
 then
   # Multi file: yes
@@ -138,8 +164,13 @@ then
       copy_s3 "$DUMP_FILE" "$S3_FILE"
     else
       >&2 echo "Error creating dump of ${DB}"
+      if [ $? -gt "$FAILCODE" ]
+      then
+	  FAILCODE=$?
+      fi
     fi
   done
+  echo "SQL backup finished"
 else
   # Multi file: no
   echo "Creating dump for ${MYSQLDUMP_DATABASE} from ${MYSQL_HOST}..."
@@ -150,9 +181,15 @@ else
   if dump_to_file "${MYSQLDUMP_DATABASE}" "${DUMP_FILE}"
   then
     copy_s3 "$DUMP_FILE" "$S3_FILE"
+    echo "SQL backup finished successfully"
   else
-    >&2 echo "Error creating dump of all databases"
+    RET=$?
+    if [ "$RET" -gt "$FAILCODE" ]
+    then
+	FAILCODE="$RET"
+    fi
+    echo "Error creating dump of all databases" >&2 
   fi
 fi
 
-echo "SQL backup finished"
+exit $FAILCODE

@@ -181,8 +181,7 @@ def step_impl(context):
     userid = "backup-" + ''.join([random.choice(string.ascii_letters + string.digits)
                                   for n in range(10)])
 
-    c.create_key(userid, algorithm="rsa3072", expires_in=31536000,
-                 sign=True, certify=True)
+    c.create_key(userid, algorithm="rsa3072", expires_in=31536000, encrypt=True)
 
     context.public_key = c.key_export_minimal(pattern=userid)
     context.private_key = c.key_export_secret(pattern=userid)

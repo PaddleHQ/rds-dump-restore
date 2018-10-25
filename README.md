@@ -1,8 +1,7 @@
 This system is designed to completely dump the data from an RDS
 instance to a file in s3 that can then be backed up elsewhere.
 
-
-## Setting up
+## Setting up for local development
 
 * You need to install the latest ansible
 * You will need python 3 - probably set up as your default python

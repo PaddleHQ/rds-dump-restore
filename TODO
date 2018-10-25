@@ -1,0 +1,3 @@
+* allow use of session keys only for decryption
+* allow use of ssm parameter store and/or secret manager for secret storage.
+* validate backup

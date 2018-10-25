@@ -1,8 +1,7 @@
-test: containers lint
+test: lint container-test containers
 	behave --tags '~@future'
 wip:
 	behave --wip
-
 
 lint:
 	find . -name '*.py' | xargs flake8 --max-line-length=100 --builtins=given,when,then \
@@ -15,6 +14,10 @@ testfix:
 
 fix:
 	find . -name '*.py' | xargs autopep8 --aggressive --max-line-length=100 --in-place
+
+container-test: 
+	$(MAKE) -C mysql-backup-s3 test
+	$(MAKE) -C s3-restore-mysql test
 
 containers: 
 	$(MAKE) -C mysql-backup-s3
