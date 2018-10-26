@@ -21,6 +21,26 @@ EOF
     rm -f aws-invocation.log
 }
 
+mockaws_noenc(){
+    cat    > mockstmp/aws <<'EOF'
+#/bin/sh
+echo mysql "$@" >> aws-invocation.log
+case "$2" in
+     ls)
+     	  echo "2018-10-25 19:34:08     729298 2018-10-25T183403Z.sql.gz"
+	  ;;
+     cp)
+	cp fixtures/2018-10-25T183403Z.sql.gz dump.sql.gz
+	  ;;
+     *)
+	echo "Mock aws command: Ignoring unexpected aws command" >&2
+esac
+exit 0
+EOF
+    chmod +x mockstmp/aws
+    rm -f aws-invocation.log
+}
+
 
 oneTimeSetUp() {
     PATH=$PWD/mockstmp:"$PATH"
@@ -100,8 +120,34 @@ echo mysql "$@" >> mysql-invocation.log
 cat >> mysql-input.log
 exit 0
 EOF
+	rm mysql-input.log
 	mockaws
 	chmod +x mockstmp/mysql
+	echo where is mysql?
+	command -v mysql
+	bash ./restore.sh
+    )
+    RET=$?
+    ${_ASSERT_EQUALS_} '"restore script failed unexpectedly"' 0 "$RET"
+    grep -qE -e '-h fake-host.example.com -P 3306 -ufakeuser -pfakepassword' mysql-invocation.log
+    ${_ASSERT_EQUALS_} '"mysql database credentials not delivered to mysql as expected"' 0 "$?"
+    grep -qE -e 'test_backup_restore' mysql-input.log
+    ${_ASSERT_EQUALS_} '"failed to dump selected database"' 0 "$?"
+}
+
+testRunsProperlyUnencrypted()
+{
+    (
+	cat    > mockstmp/mysql <<'EOF'
+#/bin/sh
+echo mysql "$@" >> mysql-invocation.log
+cat >> mysql-input.log
+exit 0
+EOF
+	rm mysql-input.log
+	mockaws_noenc
+	chmod +x mockstmp/mysql
+	PRIVATE_KEY="**None**"
 	echo where is mysql?
 	command -v mysql
 	bash ./restore.sh

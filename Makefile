@@ -1,7 +1,10 @@
-test: lint container-test containers
+test: build
 	behave --tags '~@future'
-wip:
+
+wip: build
 	behave --wip
+
+build: lint container-test containers
 
 lint:
 	find . -name '*.py' | xargs flake8 --max-line-length=100 --builtins=given,when,then \
@@ -22,3 +25,6 @@ container-test:
 containers: 
 	$(MAKE) -C mysql-backup-s3
 	$(MAKE) -C s3-restore-mysql
+
+.PHONY: build
+

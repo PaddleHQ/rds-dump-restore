@@ -17,6 +17,7 @@ ENV S3_ENDPOINT **None**
 ENV S3_S3V4 no
 ENV S3_PREFIX 'backup'
 ENV S3_FILENAME **None**
+ENV PRIVATE_KEY **None**
 
 ADD run.sh run.sh
 ADD restore.sh restore.sh

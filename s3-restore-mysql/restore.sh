@@ -93,8 +93,13 @@ LATEST_BACKUP=$(aws s3 ls s3://"$S3_BUCKET"/"$S3_PREFIX"/ | sort | tail -n 1 | a
 
 echo "Fetching ${LATEST_BACKUP} from S3"
 
-aws s3 cp "s3://$S3_BUCKET/$S3_PREFIX/${LATEST_BACKUP}" dump.sql.gz.gpg
-RESTOREFILE=dump.sql.gz.gpg
+if [ "${ENCRYPT}" = "false" ]
+then
+    RESTOREFILE=dump.sql.gz
+else
+    RESTOREFILE=dump.sql.gz.gpg
+fi
+aws s3 cp "s3://$S3_BUCKET/$S3_PREFIX/${LATEST_BACKUP}" "$RESTOREFILE"
 # TODO:
 # echo "Restoring dump for ${MYSQLDUMP_DATABASE} to ${MYSQL_HOST}..."
 

@@ -6,12 +6,12 @@ In order to be able to restore the mysql database
      and I have an s3 bucket set up for backup use
      and I have data I can check is correct in my database
 
+   @wip
    Scenario: backup the database then restore the data to a new database
    given I run a backup on the database
     when I restore that backup to a new database
     then the data from the original database should be in the new database
 
-   @wip
    Scenario: backup the database with encryption then restore with decryption
    given I have a private public key pair
      and that my s3 bucket is empty
