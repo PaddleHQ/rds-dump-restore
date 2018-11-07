@@ -118,11 +118,20 @@ def step_impl(context):
     assert_that(response, not_(has_key("FunctionError")))
 
 
-def run_fargate_with_envfile(envfile, image="paddlehq/mysql-backup-s3", call_env=[]):
+def run_fargate_with_envfile(envfile, image="paddlehq/mysql-backup-s3", call_env=None):
+    """call fargate with a set environment
+
+    use an env file to provide environment variables for fargate
+    whilst allowing us to also set or override them
+    """
+    if call_env is None:
+        call_env = {}
     task_name = image.replace("/", "_")
     env_vars = dotenv_values(envfile)
+    env_vars.update(call_env)
+    env_args = []
     for key, value in env_vars.items():
-        call_env += ["-e", "%s=%s" % (key, value)]
+        env_args += ["-e", "%s=%s" % (key, value)]
 
     security_group = env_vars["DB_SECURITY_GROUP"]
     subnet = env_vars["DB_SUBNET_ID"]
@@ -131,7 +140,7 @@ def run_fargate_with_envfile(envfile, image="paddlehq/mysql-backup-s3", call_env
     call_args = ["fargate", "--verbose", "task", "run", task_name, "--image", image,
                  "--region", region, "--security-group-id", security_group,
                  "--subnet-id", subnet]
-    call_args += call_env
+    call_args += env_args
     logging.info(" ".join(call_args))
     run(call_args)
     run(["fargate", "task", "wait", task_name, "--region", region])
@@ -193,7 +202,7 @@ def step_impl(context):
                       playbook="test-backup.yml")
     keystr = context.public_key.decode('utf-8').replace('\n', '\\n')
     run_fargate_with_envfile('backup-task-environment', image="paddlehq/mysql-backup-s3",
-                             call_env=["-e", "PUBLIC_KEY=" + keystr])
+                             call_env={"PUBLIC_KEY": keystr})
 
 
 @when(u'I restore that backup to a new database using the private key')
@@ -202,7 +211,7 @@ def step_impl(context):
                       playbook="test-backup.yml")
     keystr = context.private_key.decode('utf-8').replace('\n', '\\n')
     run_fargate_with_envfile('restore-task-environment', image="paddlehq/s3-restore-mysql",
-                             call_env=["-e", "PRIVATE_KEY=" + keystr])
+                             call_env={"PRIVATE_KEY": keystr})
 
 
 def verify_s3_object_encrypted(object):

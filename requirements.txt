@@ -5,5 +5,11 @@ boto
 mysql-connector-python
 python-dotenv
 flake8
+flake8-bugbear
 autopep8
 yamllint
+jinja2
+PyYAML
+paramiko
+cryptography
+setuptools
